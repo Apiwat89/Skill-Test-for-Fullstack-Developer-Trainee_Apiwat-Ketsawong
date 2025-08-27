@@ -1,13 +1,17 @@
 package com.example.skilltestforfullstackdevelopertrainee_apiwatketsawong;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.location.Location;
 import android.media.Image;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
@@ -16,11 +20,14 @@ import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
@@ -29,6 +36,13 @@ import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 import com.google.mlkit.vision.face.FaceLandmark;
 
+import android.Manifest;
+
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
+import android.location.Location;
+
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -36,6 +50,14 @@ public class ScanFace extends AppCompatActivity {
     private PreviewView previewView;
     private int employeeId;
     private Employee emp;
+    private boolean faceRegistered = false;
+
+    private FusedLocationProviderClient fusedLocationClient;
+    private static final double OFFICE_LAT = 37.4220936;
+    private static final double OFFICE_LNG = -122.083922;
+    private static final float ALLOWED_RADIUS_METERS = 200f;
+
+    private static final int REQUEST_CODE_PERMISSIONS = 100;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,84 +70,49 @@ public class ScanFace extends AppCompatActivity {
             return insets;
         });
 
+        previewView = findViewById(R.id.previewView);
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+
         employeeId = getIntent().getIntExtra("employeeId", -1);
         if (employeeId == -1) {
             Toast.makeText(this, "Invalid Employee", Toast.LENGTH_SHORT).show();
             finish();
         }
 
-        previewView = findViewById(R.id.previewView);
-//        startCamera();
-        testFaceFromDrawable();
+        if (checkPermissions()) {
+            startCamera();
+//          testFaceFromDrawable();
+        } else {
+            requestPermissions();
+        }
     }
 
-    private void testFaceFromDrawable() {
-        // โหลดรูปตัวอย่างจาก drawable
-        Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.test_face);
-        InputImage image = InputImage.fromBitmap(bitmap, 0);
+    private boolean checkPermissions() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
 
-        // สร้าง FaceDetector แบบเดียวกับตอนใช้กล้อง
-        FaceDetectorOptions options = new FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-                .build();
-        FaceDetector detector = FaceDetection.getClient(options);
+    private void requestPermissions() {
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION},
+                REQUEST_CODE_PERMISSIONS);
+    }
 
-        detector.process(image)
-                .addOnSuccessListener(faces -> {
-                    if (!faces.isEmpty()) {
-                        emp = new Employee(this);
-                        MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
-                        if (employee == null) {
-                            Toast.makeText(this, "Employee not found!", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-
-                        // แปลง Face เป็น Feature Vector
-                        String detectedFaceData = convertFaceToData(faces.get(0));
-                        String savedFaceData = employee.faceData;
-
-                        if (detectedFaceData.equals(savedFaceData)) {
-                            Toast.makeText(this, "Face match! Employee ID: " + employeeId, Toast.LENGTH_SHORT).show();
-
-                            // TODO: บันทึกเวลาเข้า/ออกงาน
-                            java.util.Calendar calendar = java.util.Calendar.getInstance();
-                            int hour = calendar.get(java.util.Calendar.HOUR_OF_DAY);
-                            int minute = calendar.get(java.util.Calendar.MINUTE);
-
-                            String period;
-                            if (hour >= 6 && hour < 12) {
-                                period = "เช้า"; // 6:00 - 11:59
-                            } else if (hour >= 12 && hour < 14) {
-                                period = "กลางวัน"; // 12:00 - 13:59
-                            } else if (hour >= 14 && hour < 18) {
-                                period = "บ่าย"; // 14:00 - 17:59
-                            } else {
-                                period = "เย็น"; // 18:00 - 5:59
-                            }
-
-                            String timeStr = String.format("%02d:%02d", hour, minute);
-                            emp.insertAttendance(employeeId, period, timeStr);
-                            Toast.makeText(this, "บันทึกเวลา: " + period + " " + timeStr, Toast.LENGTH_SHORT).show();
-
-                            Intent intent = new Intent(this, MainActivity.class);
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                            startActivity(intent);
-                        } else {
-                            Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
-                        }
-                    } else {
-                        Toast.makeText(this, "Face not found in drawable!", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .addOnFailureListener(e ->
-                        Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show()
-                );
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CODE_PERMISSIONS) {
+            if (checkPermissions()) {
+                startCamera();
+            } else {
+                Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        }
     }
 
     private void startCamera() {
-        final ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
-
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
         cameraProviderFuture.addListener(() -> {
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
@@ -138,27 +125,53 @@ public class ScanFace extends AppCompatActivity {
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
+                        .setImageQueueDepth(2)
                         .build();
 
+                // ใช้ PERFORMANCE_MODE_ACCURATE เพื่อความแม่นยำ
                 FaceDetectorOptions options = new FaceDetectorOptions.Builder()
-                        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
                         .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
                         .build();
 
                 FaceDetector detector = FaceDetection.getClient(options);
 
-                imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), image -> {
-                    @SuppressWarnings("UnsafeOptInUsageError")
-                    Image mediaImage = image.getImage();
+                final int REQUIRED_FRAMES = 3; // ต้องเจอใบหน้าติดต่อกันกี่ frame
+                final int[] faceCounter = {0};
+
+                imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), imageProxy -> {
+                    @android.annotation.SuppressLint("UnsafeOptInUsageError")
+                    Image mediaImage = imageProxy.getImage();
                     if (mediaImage != null) {
-                        InputImage inputImage = InputImage.fromMediaImage(mediaImage, image.getImageInfo().getRotationDegrees());
+                        InputImage inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.getImageInfo().getRotationDegrees());
                         detector.process(inputImage)
-                                .addOnSuccessListener(faces -> processFaces(faces))
-                                .addOnFailureListener(Throwable::printStackTrace)
-                                .addOnCompleteListener(result -> image.close());
+                                .addOnSuccessListener(faces -> {
+                                    if (!faces.isEmpty() && !faceRegistered) {
+                                        faceCounter[0]++;
+                                        if (faceCounter[0] >= REQUIRED_FRAMES) {
+                                            emp = new Employee(this);
+                                            MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
+                                            if (employee != null) {
+                                                String detectedFaceData = convertFaceToData(faces.get(0));
+                                                if (detectedFaceData.equals(employee.faceData)) {
+                                                    faceRegistered = true; // บันทึกครั้งเดียว
+                                                    Toast.makeText(this, "Face match!", Toast.LENGTH_SHORT).show();
+                                                    checkLocationAndSaveFace(employee);
+                                                } else {
+                                                    Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
+                                                    faceCounter[0] = 0; // รีเซ็ต counter ให้ลองใหม่
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        faceCounter[0] = 0; // ไม่มีใบหน้า reset counter
+                                    }
+                                    imageProxy.close();
+                                })
+                                .addOnFailureListener(e -> imageProxy.close());
                     } else {
-                        image.close();
+                        imageProxy.close();
                     }
                 });
 
@@ -171,30 +184,48 @@ public class ScanFace extends AppCompatActivity {
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private void processFaces(List<Face> faces) {
-        if (!faces.isEmpty()) {
-            emp = new Employee(this);
-            MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
-            if (employee == null) {
-                Toast.makeText(this, "Employee not found!", Toast.LENGTH_SHORT).show();
-                return;
-            }
+    private void checkLocationAndSaveFace(MainActivity.EmployeeModel employee) {
+        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener(location -> {
+                    if (location != null) {
+                        float[] results = new float[1];
+                        Location.distanceBetween(OFFICE_LAT, OFFICE_LNG,
+                                location.getLatitude(), location.getLongitude(), results);
+                        float distanceInMeters = results[0];
 
-            String savedFaceData = employee.faceData;
-
-            // แปลง Face จากกล้องเป็น Feature Vector
-            String detectedFaceData = convertFaceToData(faces.get(0));
-
-            if (detectedFaceData.equals(savedFaceData)) {
-                Toast.makeText(this, "Face match! Employee ID: " + employeeId, Toast.LENGTH_SHORT).show();
-                // TODO: บันทึกเวลาเข้า/ออกงาน
-            } else {
-                Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
-            }
-        }
+                        if (distanceInMeters <= ALLOWED_RADIUS_METERS) {
+                            saveAttendance(employee);
+                        } else {
+                            Toast.makeText(this, "Outside office zone: " + distanceInMeters + "m", Toast.LENGTH_LONG).show();
+                        }
+                    } else {
+                        Toast.makeText(this, "Cannot get location", Toast.LENGTH_SHORT).show();
+                    }
+                });
     }
 
-    // แปลง Face เป็น Feature Vector
+    private void saveAttendance(MainActivity.EmployeeModel employee) {
+        java.util.Calendar calendar = java.util.Calendar.getInstance();
+        int hour = calendar.get(java.util.Calendar.HOUR_OF_DAY);
+        int minute = calendar.get(java.util.Calendar.MINUTE);
+
+        String period;
+        if (hour >= 6 && hour < 12) period = "เช้า";
+        else if (hour >= 12 && hour < 14) period = "กลางวัน";
+        else if (hour >= 14 && hour < 18) period = "บ่าย";
+        else period = "เย็น";
+
+        String timeStr = String.format("%02d:%02d", hour, minute);
+        emp = new Employee(this);
+        emp.insertAttendance(employee.id, period, timeStr);
+
+        Toast.makeText(this, "Attendance saved: " + period + " " + timeStr, Toast.LENGTH_SHORT).show();
+
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(intent);
+    }
+
     private String convertFaceToData(Face face) {
         StringBuilder sb = new StringBuilder();
         sb.append(face.getBoundingBox().exactCenterX()).append(",");
@@ -211,5 +242,47 @@ public class ScanFace extends AppCompatActivity {
         if (mouth != null) sb.append(",").append(mouth.getPosition().x).append(",").append(mouth.getPosition().y);
 
         return sb.toString();
+    }
+
+    private void testFaceFromDrawable() {
+        // โหลดรูปตัวอย่างจาก drawable
+        Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.test_face);
+        InputImage image = InputImage.fromBitmap(bitmap, 0);
+
+        // สร้าง FaceDetector
+        FaceDetectorOptions options = new FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
+                .build();
+        FaceDetector detector = FaceDetection.getClient(options);
+
+        detector.process(image)
+                .addOnSuccessListener(faces -> {
+                    if (!faces.isEmpty()) {
+                        emp = new Employee(this);
+                        MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
+                        if (employee == null) {
+                            Toast.makeText(this, "Employee not found!", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+
+                        // จำลองการแปลงใบหน้าเป็นข้อมูล
+                        String detectedFaceData = convertFaceToData(faces.get(0));
+                        String savedFaceData = employee.faceData;
+
+                        if (detectedFaceData.equals(savedFaceData)) {
+                            Toast.makeText(this, "Face match! Employee ID: " + employee.id, Toast.LENGTH_SHORT).show();
+                            checkLocationAndSaveFace(employee);
+                        } else {
+                            Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
+                        }
+
+                    } else {
+                        Toast.makeText(this, "No face detected", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Toast.makeText(this, "Face detection failed", Toast.LENGTH_SHORT).show();
+                });
     }
 }
