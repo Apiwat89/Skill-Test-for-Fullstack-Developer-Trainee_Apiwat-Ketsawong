@@ -1,9 +1,18 @@
 package com.example.skilltestforfullstackdevelopertrainee_apiwatketsawong;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.sqlite.SQLiteDatabase;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.os.Bundle;
+import android.util.AttributeSet;
 import android.view.View;
 import android.widget.Button;
 
@@ -91,7 +100,7 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
                 InputPositionEmployee.setVisibility(View.GONE);
                 btnNextRegister.setVisibility(View.GONE);
 
-                findViewById(R.id.faceScannerView).setVisibility(View.VISIBLE);
+                findViewById(R.id.cameraContainer).setVisibility(View.VISIBLE);
                 startFaceScanner(InputNameEmployee.getText().toString(), InputPositionEmployee.getText().toString());
 //                testFaceFromImage();
             }
@@ -100,6 +109,7 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
 
     private void startFaceScanner(@NonNull String name, @NonNull String position) {
         PreviewView previewView = findViewById(R.id.faceScannerView);
+        FaceOverlayView faceOverlay = findViewById(R.id.faceOverlay);
 
         ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
 
@@ -107,11 +117,9 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
-                // Preview
                 Preview preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-                // Image Analysis
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
@@ -123,7 +131,7 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
 
                 FaceDetector detector = FaceDetection.getClient(options);
 
-                final int REQUIRED_FRAMES = 3; // ต้องเจอใบหน้าติดกัน 3 frame
+                final int REQUIRED_FRAMES = 3;
                 final int[] faceCounter = {0};
 
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), imageProxy -> {
@@ -139,25 +147,33 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
                                         if (faceCounter[0] >= REQUIRED_FRAMES) {
                                             Face face = faces.get(0);
 
-                                            // แปลง MediaImage -> Bitmap
-                                            Bitmap frameBitmap = toBitmap(mediaImage);
-                                            Bitmap faceBitmap = cropFace(frameBitmap, face);
+                                            // วาดกรอบตรงกลางหน้าจอ
+                                            int width = previewView.getWidth() * 2 / 3;
+                                            int height = previewView.getHeight() / 3;
+                                            int left = (previewView.getWidth() - width) / 2;
+                                            int top = (previewView.getHeight() - height) / 2;
+                                            RectF rect = new RectF(left, top, left + width, top + height);
+                                            faceOverlay.setFaceRect(rect);
 
-                                            // สร้าง feature vector จาก faceBitmap หรือใช้ convertFaceToData
-                                            String faceData = convertFaceToData(face);
+                                            // ตรวจว่าใบหน้าอยู่ในกรอบ
+                                            Rect boundingBox = face.getBoundingBox();
+                                            if (rect.contains(boundingBox.centerX(), boundingBox.centerY())) {
+                                                emp = new Employee(Register.this);
+                                                emp.insertEmployee(name, position, convertFaceToData(face));
+                                                faceSaved = true;
 
-                                            emp = new Employee(this);
-                                            emp.insertEmployee(name, position, faceData);
-                                            faceSaved = true;
+                                                Toast.makeText(Register.this, "Face registered successfully!", Toast.LENGTH_SHORT).show();
 
-                                            Toast.makeText(this, "Face registered successfully!", Toast.LENGTH_SHORT).show();
-
-                                            Intent intent = new Intent(this, MainActivity.class);
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                                            startActivity(intent);
+                                                Intent intent = new Intent(Register.this, MainActivity.class);
+                                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                                startActivity(intent);
+                                            } else {
+                                                Toast.makeText(Register.this, "Please align your face in the frame", Toast.LENGTH_SHORT).show();
+                                                faceCounter[0] = 0;
+                                            }
                                         }
                                     } else {
-                                        faceCounter[0] = 0; // reset ถ้าไม่มีใบหน้า
+                                        faceCounter[0] = 0;
                                     }
                                     imageProxy.close();
                                 })
@@ -175,24 +191,6 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
                 e.printStackTrace();
             }
         }, ContextCompat.getMainExecutor(this));
-    }
-
-    // ฟังก์ชันแปลง MediaImage -> Bitmap
-    private Bitmap toBitmap(Image image) {
-        ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-        byte[] bytes = new byte[buffer.remaining()];
-        buffer.get(bytes);
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-    }
-
-    // Crop ใบหน้า
-    private Bitmap cropFace(Bitmap frameBitmap, Face face) {
-        Rect bounds = face.getBoundingBox();
-        int x = Math.max(bounds.left, 0);
-        int y = Math.max(bounds.top, 0);
-        int width = Math.min(bounds.width(), frameBitmap.getWidth() - x);
-        int height = Math.min(bounds.height(), frameBitmap.getHeight() - y);
-        return Bitmap.createBitmap(frameBitmap, x, y, width, height);
     }
 
     // แปลง Face เป็น Feature Vector แบบง่าย

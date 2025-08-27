@@ -4,6 +4,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.location.Location;
 import android.media.Image;
 import android.os.Bundle;
@@ -43,20 +45,21 @@ import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
 import android.location.Location;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 public class ScanFace extends AppCompatActivity {
     private PreviewView previewView;
+    private FaceOverlayView faceOverlay;
     private int employeeId;
     private Employee emp;
-    private boolean faceRegistered = false;
 
+    private boolean faceRegistered = false;
     private FusedLocationProviderClient fusedLocationClient;
     private static final double OFFICE_LAT = 37.4220936;
     private static final double OFFICE_LNG = -122.083922;
     private static final float ALLOWED_RADIUS_METERS = 200f;
-
     private static final int REQUEST_CODE_PERMISSIONS = 100;
 
     @Override
@@ -71,6 +74,7 @@ public class ScanFace extends AppCompatActivity {
         });
 
         previewView = findViewById(R.id.previewView);
+        faceOverlay = findViewById(R.id.faceOverlay);
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
         employeeId = getIntent().getIntExtra("employeeId", -1);
@@ -80,8 +84,8 @@ public class ScanFace extends AppCompatActivity {
         }
 
         if (checkPermissions()) {
-            startCamera();
-//          testFaceFromDrawable();
+            previewView.post(this::startCamera);
+//            testFaceFromDrawable();
         } else {
             requestPermissions();
         }
@@ -103,7 +107,7 @@ public class ScanFace extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (checkPermissions()) {
-                startCamera();
+                previewView.post(this::startCamera);
             } else {
                 Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show();
                 finish();
@@ -125,47 +129,61 @@ public class ScanFace extends AppCompatActivity {
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
-                        .setImageQueueDepth(2)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
 
-                // ใช้ PERFORMANCE_MODE_ACCURATE เพื่อความแม่นยำ
                 FaceDetectorOptions options = new FaceDetectorOptions.Builder()
                         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
                         .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
                         .build();
 
                 FaceDetector detector = FaceDetection.getClient(options);
-
-                final int REQUIRED_FRAMES = 3; // ต้องเจอใบหน้าติดต่อกันกี่ frame
+                final int REQUIRED_FRAMES = 3;
                 final int[] faceCounter = {0};
 
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), imageProxy -> {
                     @android.annotation.SuppressLint("UnsafeOptInUsageError")
                     Image mediaImage = imageProxy.getImage();
-                    if (mediaImage != null) {
+                    if (mediaImage != null && !faceRegistered) {
                         InputImage inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.getImageInfo().getRotationDegrees());
                         detector.process(inputImage)
                                 .addOnSuccessListener(faces -> {
-                                    if (!faces.isEmpty() && !faceRegistered) {
+                                    if (!faces.isEmpty()) {
                                         faceCounter[0]++;
                                         if (faceCounter[0] >= REQUIRED_FRAMES) {
-                                            emp = new Employee(this);
-                                            MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
-                                            if (employee != null) {
-                                                String detectedFaceData = convertFaceToData(faces.get(0));
-                                                if (detectedFaceData.equals(employee.faceData)) {
-                                                    faceRegistered = true; // บันทึกครั้งเดียว
-                                                    Toast.makeText(this, "Face match!", Toast.LENGTH_SHORT).show();
-                                                    checkLocationAndSaveFace(employee);
-                                                } else {
-                                                    Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
-                                                    faceCounter[0] = 0; // รีเซ็ต counter ให้ลองใหม่
+                                            Face face = faces.get(0);
+
+                                            // วาดกรอบตรงกลางหน้าจอ
+                                            int width = previewView.getWidth() * 2 / 3;
+                                            int height = previewView.getHeight() / 3;
+                                            int left = (previewView.getWidth() - width) / 2;
+                                            int top = (previewView.getHeight() - height) / 2;
+                                            RectF rect = new RectF(left, top, left + width, top + height);
+                                            faceOverlay.setFaceRect(rect);
+
+                                            // ตรวจว่าใบหน้าอยู่ในกรอบ
+                                            Rect boundingBox = face.getBoundingBox();
+                                            if (rect.contains(boundingBox.centerX(), boundingBox.centerY())) {
+                                                emp = new Employee(ScanFace.this);
+                                                MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
+                                                if (employee != null) {
+                                                    String detectedFaceData = convertFaceToData(face);
+                                                    if (detectedFaceData.equals(employee.faceData)) {
+                                                        faceRegistered = true;
+                                                        Toast.makeText(this, "Face match!", Toast.LENGTH_SHORT).show();
+                                                        checkLocationAndSaveFace(employee);
+                                                    } else {
+                                                        Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
+                                                        faceCounter[0] = 0;
+                                                    }
                                                 }
+                                            } else {
+                                                Toast.makeText(this, "Please align your face in the frame", Toast.LENGTH_SHORT).show();
+                                                faceCounter[0] = 0;
                                             }
                                         }
                                     } else {
-                                        faceCounter[0] = 0; // ไม่มีใบหน้า reset counter
+                                        faceCounter[0] = 0;
                                     }
                                     imageProxy.close();
                                 })
