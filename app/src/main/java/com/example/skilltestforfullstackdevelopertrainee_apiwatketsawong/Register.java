@@ -3,6 +3,7 @@ package com.example.skilltestforfullstackdevelopertrainee_apiwatketsawong;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.AssetFileDescriptor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -16,8 +17,11 @@ import android.util.AttributeSet;
 import android.view.View;
 import android.widget.Button;
 
+import org.tensorflow.lite.Interpreter;
+
 import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.graphics.Insets;
@@ -44,7 +48,12 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.util.List;
 
 import android.Manifest;
@@ -52,22 +61,20 @@ import android.Manifest;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.mlkit.vision.face.FaceLandmark;
 
+import androidx.camera.core.ExperimentalGetImage;
+
 public class Register extends AppCompatActivity implements View.OnClickListener {
     private TextInputEditText InputNameEmployee, InputPositionEmployee;
     private Button btnNextRegister;
     private Employee emp;
     private boolean faceSaved = false;
+    private Interpreter tfLite;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_register);
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
 
         InputNameEmployee = findViewById(R.id.InputNameEmployee);
         InputPositionEmployee = findViewById(R.id.InputPositonEmployee);
@@ -75,16 +82,14 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
 
         btnNextRegister.setOnClickListener(this);
         requestPermissions();
+        loadModel();
+
+//        testFaceRegistrationWithDrawable(); // test
     }
 
     private void requestPermissions() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-                || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-
-            ActivityCompat.requestPermissions(this, new String[]{
-                    Manifest.permission.CAMERA,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-            }, 100);
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
     }
 
@@ -96,160 +101,242 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
             } else if (InputPositionEmployee.getText().toString().isEmpty()) {
                 InputPositionEmployee.setError("Please enter position");
             } else {
+                String name = InputNameEmployee.getText().toString().trim();
+                String position = InputPositionEmployee.getText().toString().trim();
+
                 InputNameEmployee.setVisibility(View.GONE);
                 InputPositionEmployee.setVisibility(View.GONE);
                 btnNextRegister.setVisibility(View.GONE);
 
                 findViewById(R.id.cameraContainer).setVisibility(View.VISIBLE);
-                startFaceScanner(InputNameEmployee.getText().toString(), InputPositionEmployee.getText().toString());
-//                testFaceFromImage();
+                startFaceScanner(name, position);
             }
         }
     }
 
+    private MappedByteBuffer loadModelFile(String modelFile) throws IOException {
+        AssetFileDescriptor fileDescriptor = getAssets().openFd(modelFile);
+        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
+        FileChannel fileChannel = inputStream.getChannel();
+        long startOffset = fileDescriptor.getStartOffset();
+        long declaredLength = fileDescriptor.getDeclaredLength();
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
+    }
+
+    private void loadModel() {
+        try {
+            tfLite = new Interpreter(loadModelFile("mobilefacenet.tflite"));
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Failed to load TFLite model", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+
+    @OptIn(markerClass = ExperimentalGetImage.class)
     private void startFaceScanner(@NonNull String name, @NonNull String position) {
         PreviewView previewView = findViewById(R.id.faceScannerView);
         FaceOverlayView faceOverlay = findViewById(R.id.faceOverlay);
 
-        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+        previewView.post(() -> {
+            int width = previewView.getWidth() * 2 / 3;
+            int height = previewView.getHeight() / 3;
+            int left = (previewView.getWidth() - width) / 2;
+            int top = (previewView.getHeight() - height) / 2;
+            RectF rect = new RectF(left, top, left + width, top + height);
+            faceOverlay.setFaceRect(rect);
 
-        cameraProviderFuture.addListener(() -> {
-            try {
-                ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+            ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+            cameraProviderFuture.addListener(() -> {
+                try {
+                    ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+                    Preview preview = new Preview.Builder().build();
+                    preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-                Preview preview = new Preview.Builder().build();
-                preview.setSurfaceProvider(previewView.getSurfaceProvider());
+                    ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build();
 
-                ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build();
+                    FaceDetectorOptions options = new FaceDetectorOptions.Builder()
+                            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+                            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                            .setMinFaceSize(0.2f)
+                            .enableTracking()
+                            .build();
+                    FaceDetector detector = FaceDetection.getClient(options);
 
-                FaceDetectorOptions options = new FaceDetectorOptions.Builder()
-                        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-                        .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-                        .build();
+                    final long REQUIRED_DURATION_MS = 2000;
+                    final long[] faceStartTime = {0};
 
-                FaceDetector detector = FaceDetection.getClient(options);
+                    imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), imageProxy -> {
+                        @SuppressLint("UnsafeOptInUsageError")
+                        Image mediaImage = imageProxy.getImage();
+                        if (mediaImage != null && !faceSaved) {
+                            InputImage inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.getImageInfo().getRotationDegrees());
+                            detector.process(inputImage)
+                                    .addOnSuccessListener(faces -> {
+                                        try {
+                                            if (!faces.isEmpty()) {
+                                                Face face = faces.get(0);
 
-                final int REQUIRED_FRAMES = 3;
-                final int[] faceCounter = {0};
+                                                // ตรวจสอบใบหน้าอยู่ในกรอบ
+                                                Rect bounds = face.getBoundingBox();
+                                                float scaleX = (float) previewView.getWidth() / (float) mediaImage.getHeight();
+                                                float scaleY = (float) previewView.getHeight() / (float) mediaImage.getWidth();
+                                                float centerX = bounds.centerX() * scaleX;
+                                                float centerY = bounds.centerY() * scaleY;
 
-                imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), imageProxy -> {
-                    @SuppressLint("UnsafeOptInUsageError")
-                    Image mediaImage = imageProxy.getImage();
-                    if (mediaImage != null && !faceSaved) {
-                        InputImage inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.getImageInfo().getRotationDegrees());
+                                                long currentTime = System.currentTimeMillis();
 
-                        detector.process(inputImage)
-                                .addOnSuccessListener(faces -> {
-                                    if (!faces.isEmpty()) {
-                                        faceCounter[0]++;
-                                        if (faceCounter[0] >= REQUIRED_FRAMES) {
-                                            Face face = faces.get(0);
+                                                if (new RectF(left, top, left + width, top + height).contains(centerX, centerY)) {
+                                                    if (faceStartTime[0] == 0) faceStartTime[0] = currentTime;
+                                                    else if (currentTime - faceStartTime[0] >= REQUIRED_DURATION_MS) {
+                                                        // ใช้โมเดลจริง
+                                                        float[] embedding = getFaceEmbedding(mediaImage, face);
 
-                                            // วาดกรอบตรงกลางหน้าจอ
-                                            int width = previewView.getWidth() * 2 / 3;
-                                            int height = previewView.getHeight() / 3;
-                                            int left = (previewView.getWidth() - width) / 2;
-                                            int top = (previewView.getHeight() - height) / 2;
-                                            RectF rect = new RectF(left, top, left + width, top + height);
-                                            faceOverlay.setFaceRect(rect);
+                                                        // บันทึกลง DB
+                                                        ByteBuffer buffer = ByteBuffer.allocate(embedding.length * 4).order(ByteOrder.LITTLE_ENDIAN);
+                                                        for (float f : embedding) buffer.putFloat(f);
+                                                        byte[] faceBytes = buffer.array();
 
-                                            // ตรวจว่าใบหน้าอยู่ในกรอบ
-                                            Rect boundingBox = face.getBoundingBox();
-                                            if (rect.contains(boundingBox.centerX(), boundingBox.centerY())) {
-                                                emp = new Employee(Register.this);
-                                                emp.insertEmployee(name, position, convertFaceToData(face));
-                                                faceSaved = true;
+                                                        emp = new Employee(this);
+                                                        emp.insertEmployeeWithEmbedding(name, position, faceBytes);
 
-                                                Toast.makeText(Register.this, "Face registered successfully!", Toast.LENGTH_SHORT).show();
+                                                        faceSaved = true;
+                                                        Toast.makeText(this, "Face registered successfully!", Toast.LENGTH_SHORT).show();
 
-                                                Intent intent = new Intent(Register.this, MainActivity.class);
-                                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                                                startActivity(intent);
-                                            } else {
-                                                Toast.makeText(Register.this, "Please align your face in the frame", Toast.LENGTH_SHORT).show();
-                                                faceCounter[0] = 0;
-                                            }
+                                                        Intent intent = new Intent(this, MainActivity.class);
+                                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                                        startActivity(intent);
+                                                    }
+                                                } else faceStartTime[0] = 0;
+                                            } else faceStartTime[0] = 0;
+                                        } catch (Exception e) {
+                                            e.printStackTrace();
+                                        } finally {
+                                            imageProxy.close();
                                         }
-                                    } else {
-                                        faceCounter[0] = 0;
-                                    }
-                                    imageProxy.close();
-                                })
-                                .addOnFailureListener(e -> imageProxy.close());
-                    } else {
-                        imageProxy.close();
-                    }
-                });
+                                    })
+                                    .addOnFailureListener(e -> imageProxy.close());
+                        } else {
+                            imageProxy.close();
+                        }
+                    });
 
-                CameraSelector cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
-                cameraProvider.unbindAll();
-                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
+                    CameraSelector cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
+                    cameraProvider.unbindAll();
+                    cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
 
-            } catch (Exception e) {
-                e.printStackTrace();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }, ContextCompat.getMainExecutor(this));
+        });
+    }
+
+    @ExperimentalGetImage
+    private float[] getFaceEmbedding(Image mediaImage, Face face) {
+        Bitmap bitmap = toBitmap(mediaImage);
+
+        Rect bounds = face.getBoundingBox();
+        bounds.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight());
+        Bitmap faceBitmap = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height());
+
+        Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, 112, 112, true);
+
+        ByteBuffer input = ByteBuffer.allocateDirect(1 * 112 * 112 * 3 * 4);
+        input.order(ByteOrder.nativeOrder());
+
+        for (int y = 0; y < 112; y++) {
+            for (int x = 0; x < 112; x++) {
+                int px = resized.getPixel(x, y);
+                input.putFloat(((px >> 16 & 0xFF) - 127.5f) / 128f); // R
+                input.putFloat(((px >> 8 & 0xFF) - 127.5f) / 128f);  // G
+                input.putFloat(((px & 0xFF) - 127.5f) / 128f);       // B
             }
-        }, ContextCompat.getMainExecutor(this));
+        }
+
+        float[][] embedding = new float[1][192]; // MobileFaceNet output
+        tfLite.run(input, embedding);
+
+        return embedding[0];
     }
 
-    // แปลง Face เป็น Feature Vector แบบง่าย
-    private String convertFaceToData(Face face) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(face.getBoundingBox().exactCenterX()).append(",")
-                .append(face.getBoundingBox().exactCenterY());
-
-        FaceLandmark leftEye = face.getLandmark(FaceLandmark.LEFT_EYE);
-        FaceLandmark rightEye = face.getLandmark(FaceLandmark.RIGHT_EYE);
-        FaceLandmark nose = face.getLandmark(FaceLandmark.NOSE_BASE);
-        FaceLandmark mouth = face.getLandmark(FaceLandmark.MOUTH_BOTTOM);
-
-        if (leftEye != null) sb.append(",").append(leftEye.getPosition().x).append(",").append(leftEye.getPosition().y);
-        if (rightEye != null) sb.append(",").append(rightEye.getPosition().x).append(",").append(rightEye.getPosition().y);
-        if (nose != null) sb.append(",").append(nose.getPosition().x).append(",").append(nose.getPosition().y);
-        if (mouth != null) sb.append(",").append(mouth.getPosition().x).append(",").append(mouth.getPosition().y);
-
-        return sb.toString();
+    private Bitmap toBitmap(Image mediaImage) {
+        if (mediaImage == null) return null;
+        Bitmap bitmap = Bitmap.createBitmap(mediaImage.getWidth(), mediaImage.getHeight(), Bitmap.Config.ARGB_8888);
+        YuvToRgbConverter converter = new YuvToRgbConverter(this);
+        converter.yuvToRgb(mediaImage, bitmap);
+        return bitmap;
     }
 
-    private void testFaceFromImage() {
-        // โหลดรูปจาก drawable
-        Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.test_face);
-        InputImage image = InputImage.fromBitmap(bitmap, 0);
+    //    private void testFaceRegistrationWithDrawable() {
+//        Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.test_face);
+//
+//        if (bitmap == null) {
+//            Toast.makeText(this, "Cannot load drawable", Toast.LENGTH_SHORT).show();
+//            return;
+//        }
+//
+//        // สร้าง InputImage จาก Bitmap
+//        InputImage image = InputImage.fromBitmap(bitmap, 0); // 0 หมายถึง rotation
+//
+//        // สร้าง FaceDetector
+//        FaceDetector detector = FaceDetection.getClient(
+//                new FaceDetectorOptions.Builder()
+//                        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+//                        .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+//                        .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+//                        .setMinFaceSize(0.2f)
+//                        .enableTracking()
+//                        .build()
+//        );
+//
+//        // ประมวลผลรูป
+//        detector.process(image)
+//                .addOnSuccessListener(faces -> {
+//                    if (!faces.isEmpty()) {
+//                        // ใช้ Face ตัวแรก
+//                        Face face = faces.get(0);
+//
+//                        // เรียกฟังก์ชัน embedding
+//                        float[] embedding = getFaceEmbedding(bitmap, face);
+//
+//                        // แสดงผล embedding size
+//                        Toast.makeText(this, "Embedding size: " + embedding.length, Toast.LENGTH_LONG).show();
+//
+//                        // ทดสอบบันทึกลง DB
+//                        emp = new Employee(this);
+//                        emp.insertEmployeeWithEmbedding("Test Name", "Developer", embedding);
+//
+//                        Toast.makeText(this, "Inserted into DB", Toast.LENGTH_LONG).show();
+//                    } else {
+//                        Toast.makeText(this, "No face detected in drawable", Toast.LENGTH_SHORT).show();
+//                    }
+//                })
+//                .addOnFailureListener(e -> Toast.makeText(this, "Face detection failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+//    }
 
-        // สร้าง FaceDetector
-        FaceDetectorOptions options = new FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL) // ตรวจ landmark เพื่อ feature vector
-                .build();
-        FaceDetector detector = FaceDetection.getClient(options);
-
-        detector.process(image)
-                .addOnSuccessListener(faces -> {
-                    if (faces.size() > 0) {
-                        Face face = faces.get(0);
-
-                        // แปลงเป็น feature vector
-                        String faceData = convertFaceToData(face);
-
-                        // บันทึกลง DB
-                        emp = new Employee(this);
-                        String name = InputNameEmployee.getText().toString().trim();
-                        String position = InputPositionEmployee.getText().toString().trim();
-                        emp.insertEmployee(name, position, faceData);
-
-                        Toast.makeText(this, "Employee saved with face data!", Toast.LENGTH_SHORT).show();
-                        Toast.makeText(this, "Face registered successfully!", Toast.LENGTH_SHORT).show();
-
-                        Intent intent = new Intent(this, MainActivity.class);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                        startActivity(intent);
-                    } else {
-                        Toast.makeText(this, "Face not found", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .addOnFailureListener(e ->
-                        Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show()
-                );
-    }
+//    public float[] getFaceEmbedding(Bitmap bitmap, Face face) {
+//        Rect bounds = face.getBoundingBox();
+//        bounds.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight());
+//        Bitmap faceBitmap = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height());
+//        Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, 112, 112, true);
+//
+//        int width = resized.getWidth();
+//        int height = resized.getHeight();
+//        float[] embedding = new float[width * height * 3];
+//        int idx = 0;
+//
+//        for (int y = 0; y < height; y++) {
+//            for (int x = 0; x < width; x++) {
+//                int pixel = resized.getPixel(x, y);
+//                embedding[idx++] = ((pixel >> 16 & 0xFF) - 128f) / 128f;
+//                embedding[idx++] = ((pixel >> 8 & 0xFF) - 128f) / 128f;
+//                embedding[idx++] = ((pixel & 0xFF) - 128f) / 128f;
+//            }
+//        }
+//        return embedding;
+//    }
 }

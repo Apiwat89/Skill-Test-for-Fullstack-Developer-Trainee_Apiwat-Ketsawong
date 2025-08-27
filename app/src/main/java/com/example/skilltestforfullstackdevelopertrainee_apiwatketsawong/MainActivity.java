@@ -73,7 +73,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         public int id;
         public String name;
         public String position;
-        public String faceData;
+        public byte[] faceEmbedding;
     }
 
     public interface OnItemClickListener {
