@@ -17,8 +17,11 @@ import android.widget.Toast;
 
 import org.tensorflow.lite.Interpreter;
 
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteOrder;
 
 import androidx.activity.EdgeToEdge;
@@ -133,18 +136,30 @@ public class ScanFace extends AppCompatActivity {
         }
     }
 
-    private MappedByteBuffer loadModelFile(String modelFile) throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd(modelFile);
-        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
-        FileChannel fileChannel = inputStream.getChannel();
-        long startOffset = fileDescriptor.getStartOffset();
-        long declaredLength = fileDescriptor.getDeclaredLength();
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
-    }
-
     private void loadModel() {
         try {
-            tfLite = new Interpreter(loadModelFile("mobilefacenet.tflite"));
+            // copy จาก assets -> internal storage
+            String fileName = "mobilefacenet.tflite";
+            File file = new File(getFilesDir(), fileName);
+            if (!file.exists()) {
+                InputStream is = getAssets().open(fileName);
+                FileOutputStream fos = new FileOutputStream(file);
+                byte[] buffer = new byte[1024];
+                int read;
+                while ((read = is.read(buffer)) != -1) {
+                    fos.write(buffer, 0, read);
+                }
+                fos.flush();
+                fos.close();
+                is.close();
+            }
+
+            // โหลด model จาก internal storage
+            FileInputStream inputStream = new FileInputStream(file);
+            FileChannel fileChannel = inputStream.getChannel();
+            MappedByteBuffer mappedBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileChannel.size());
+            tfLite = new Interpreter(mappedBuffer);
+
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Failed to load TFLite model", Toast.LENGTH_SHORT).show();
