@@ -48,7 +48,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         List<EmployeeModel> employeeList = loadEmployees();
 
         EmployeeAdapter adapter = new EmployeeAdapter(this, employeeList, employee -> {
-            // เมื่อคลิกชื่อพนักงาน ส่งไปหน้า ScanFaceActivity
+            // เมื่อคลิกชื่อพนักงาน ส่งไปหน้า ScanFace
             Intent intent = new Intent(MainActivity.this, ScanFace.class);
             intent.putExtra("employeeId", employee.id);
             startActivity(intent);

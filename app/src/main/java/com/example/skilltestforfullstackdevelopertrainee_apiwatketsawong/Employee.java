@@ -60,7 +60,7 @@ public class Employee extends SQLiteOpenHelper {
         db.close();
     }
 
-    // ดึงข้อมูล Employee ทั้งหมด MainActivity
+    // Pull all employee data into MainActivity
     public List<MainActivity.EmployeeModel> getAllEmployeesMainActivity() {
         List<MainActivity.EmployeeModel> list = new ArrayList<>();
         SQLiteDatabase db = this.getReadableDatabase();
@@ -80,7 +80,7 @@ public class Employee extends SQLiteOpenHelper {
         return list;
     }
 
-    // ดึงข้อมูล Employee ทั้งหมด Report
+    // Pull all employee data into a report
     public List<Report.EmployeeModel> getAllEmployeesReport() {
         List<Report.EmployeeModel> list = new ArrayList<>();
         SQLiteDatabase db = this.getReadableDatabase();
@@ -100,7 +100,7 @@ public class Employee extends SQLiteOpenHelper {
         return list;
     }
 
-    // ดึง Employee ตาม id หน้า MainActivity
+    // Pull employee data by ID on the MainActivity page.
     public MainActivity.EmployeeModel getEmployeeById(int id) {
         SQLiteDatabase db = this.getReadableDatabase();
         Cursor cursor = db.rawQuery("SELECT id, name, position, faceEmbedding FROM employees WHERE id = ?", new String[]{String.valueOf(id)});
@@ -128,7 +128,7 @@ public class Employee extends SQLiteOpenHelper {
         db.close();
     }
 
-    // ดึง attendance ตาม id หน้า Report
+    // Pull attendance data with report page code
     public List<ReportPerson.AttendanceRecord> getAttendanceByEmployee(int employeeId) {
         List<ReportPerson.AttendanceRecord> list = new ArrayList<>();
         SQLiteDatabase db = this.getReadableDatabase();

@@ -13,6 +13,7 @@
         android:layout_height="wrap_content"
         android:text="Report"
         android:textSize="34sp"
+        android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -21,8 +22,8 @@
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/employeeListView"
-        android:layout_width="385dp"
-        android:layout_height="604dp"
+        android:layout_width="325dp"
+        android:layout_height="605dp"
         android:layout_marginTop="20dp"
         android:layout_marginBottom="108dp"
         android:layout_weight="1"

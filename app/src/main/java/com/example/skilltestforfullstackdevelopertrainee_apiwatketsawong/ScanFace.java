@@ -3,27 +3,31 @@ package com.example.skilltestforfullstackdevelopertrainee_apiwatketsawong;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.location.Location;
 import android.media.Image;
 import android.os.Bundle;
 import android.util.Log;
-import android.util.Size;
 import android.widget.Toast;
+
+import com.google.android.gms.tasks.CancellationTokenSource;
+import com.google.android.gms.location.Priority;
 
 import org.tensorflow.lite.Interpreter;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutionException;
 
 import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
@@ -36,7 +40,6 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
-
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
@@ -44,29 +47,19 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.tasks.CancellationTokenSource;
+import com.google.android.gms.location.Priority;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
 import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
-import com.google.mlkit.vision.face.FaceLandmark;
 
 import android.Manifest;
-
-import com.google.android.gms.location.FusedLocationProviderClient;
-import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.location.Priority;
-import android.location.Location;
-
-import java.nio.ByteBuffer;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.ExecutionException;
 
 public class ScanFace extends AppCompatActivity {
     private int employeeId;
@@ -74,10 +67,13 @@ public class ScanFace extends AppCompatActivity {
     private boolean faceRegistered = false;
 
     private FusedLocationProviderClient fusedLocationClient;
-    private static final double OFFICE_LAT = 37.4220936;
-    private static final double OFFICE_LNG = -122.083922;
+    private LocationRequest locationRequest;
+    private android.location.Location currentLocation;
+
+    private static final double OFFICE_LAT = 14.146196809999436;
+    private static final double OFFICE_LNG = 101.3660215078272;
     private static final float ALLOWED_RADIUS_METERS = 200f;
-    private static final int REQUEST_CODE_PERMISSIONS = 100;
+    private static final int REQUEST_LOCATION_PERMISSION = 101;
 
     // TFLite
     private Interpreter tfLite;
@@ -106,9 +102,14 @@ public class ScanFace extends AppCompatActivity {
 
         loadModel();
         requestPermissions();
+        requestLocationPermission();
+
+        initLocationRequest();
+        startLocationUpdates();
+
         startCamera(employeeId);
 
-//        testFaceWithDrawable(employeeId); // test
+//        testFaceWithDrawable(employeeId); test
     }
 
     private void requestPermissions() {
@@ -117,9 +118,24 @@ public class ScanFace extends AppCompatActivity {
         }
     }
 
+    private void requestLocationPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_LOCATION_PERMISSION);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_LOCATION_PERMISSION) {
+            if (!(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
+                Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
     private void loadModel() {
         try {
-            // copy จาก assets -> internal storage
             String fileName = "mobilefacenet.tflite";
             File file = new File(getFilesDir(), fileName);
             if (!file.exists()) {
@@ -135,7 +151,6 @@ public class ScanFace extends AppCompatActivity {
                 is.close();
             }
 
-            // โหลด model จาก internal storage
             FileInputStream inputStream = new FileInputStream(file);
             FileChannel fileChannel = inputStream.getChannel();
             MappedByteBuffer mappedBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileChannel.size());
@@ -147,9 +162,32 @@ public class ScanFace extends AppCompatActivity {
         }
     }
 
+    private void initLocationRequest() {
+        locationRequest = LocationRequest.create()
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+                .setInterval(2000)
+                .setFastestInterval(1000);
+    }
+
+    private void startLocationUpdates() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_LOCATION_PERMISSION);
+            return;
+        }
+
+        fusedLocationClient.requestLocationUpdates(locationRequest, new LocationCallback() {
+            @Override
+            public void onLocationResult(LocationResult locationResult) {
+                if (locationResult == null) return;
+                currentLocation = locationResult.getLastLocation();
+                Log.d("LocationUpdate", "Lat: " + currentLocation.getLatitude() + ", Lng: " + currentLocation.getLongitude());
+            }
+        }, getMainLooper());
+    }
+
     @OptIn(markerClass = ExperimentalGetImage.class)
     private void startCamera(int employeeId) {
-        PreviewView previewView = findViewById(R.id.faceScannerView);
+        PreviewView previewView = findViewById(R.id.previewView);
         FaceOverlayView faceOverlay = findViewById(R.id.faceOverlay);
 
         previewView.post(() -> {
@@ -158,7 +196,6 @@ public class ScanFace extends AppCompatActivity {
             int left = (previewView.getWidth() - width) / 2;
             int top = (previewView.getHeight() - height) / 2;
             RectF rect = new RectF(left, top, left + width, top + height);
-            faceOverlay.setFaceRect(rect);
 
             ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
             cameraProviderFuture.addListener(() -> {
@@ -200,7 +237,6 @@ public class ScanFace extends AppCompatActivity {
                                             if (!faces.isEmpty()) {
                                                 Face face = faces.get(0);
 
-                                                // Scale centerX/centerY ให้ตรงกับ PreviewView
                                                 float scaleX = previewView.getWidth() / (float) mediaImage.getHeight();
                                                 float scaleY = previewView.getHeight() / (float) mediaImage.getWidth();
                                                 float centerX = face.getBoundingBox().centerX() * scaleX;
@@ -222,9 +258,8 @@ public class ScanFace extends AppCompatActivity {
                                                         float[] savedEmbedding = byteArrayToFloatArray(savedFaceBytes);
 
                                                         float distance = calculateDistance(embedding, savedEmbedding);
-                                                        Toast.makeText(this, "Distance = " + distance, Toast.LENGTH_SHORT).show();
 
-                                                        if (distance < 2.5f) {
+                                                        if (distance < 1.5f) {
                                                             faceRegistered = true;
                                                             Toast.makeText(this, "Face matched!", Toast.LENGTH_SHORT).show();
                                                             checkLocationAndSaveFace(employee);
@@ -311,16 +346,11 @@ public class ScanFace extends AppCompatActivity {
         Image image = imageProxy.getImage();
         if (image == null) return null;
 
-        YuvToRgbConverter yuvToRgbConverter = new YuvToRgbConverter(this, 640, 480);
-        if (yuvToRgbConverter == null) {
-            yuvToRgbConverter = new YuvToRgbConverter(this, imageProxy.getWidth(), imageProxy.getHeight());
-        }
-
+        YuvToRgbConverter yuvToRgbConverter = new YuvToRgbConverter(this, imageProxy.getWidth(), imageProxy.getHeight());
         Bitmap bitmap = Bitmap.createBitmap(imageProxy.getWidth(), imageProxy.getHeight(), Bitmap.Config.ARGB_8888);
         byte[] nv21 = yuv420ToNv21(image);
         yuvToRgbConverter.yuvToRgb(nv21, bitmap);
 
-        // หมุนตาม orientation
         int rotation = imageProxy.getImageInfo().getRotationDegrees();
         if (rotation != 0) {
             Matrix matrix = new Matrix();
@@ -373,37 +403,48 @@ public class ScanFace extends AppCompatActivity {
     }
 
     private void checkLocationAndSaveFace(MainActivity.EmployeeModel employee) {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (currentLocation == null) {
+            Toast.makeText(this, "Waiting for location...", Toast.LENGTH_SHORT).show();
+
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this,
+                    Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+
+            fusedLocationClient.getCurrentLocation(
+                    Priority.PRIORITY_HIGH_ACCURACY,
+                    new CancellationTokenSource().getToken()
+            ).addOnSuccessListener(location -> {
+                if (location != null) {
+                    currentLocation = location;
+                    checkLocationAndSaveFace(employee);
+                } else {
+                    Toast.makeText(this, "Cannot get location", Toast.LENGTH_SHORT).show();
+                    faceRegistered = false;
+                }
+            }).addOnFailureListener(e -> {
+                Toast.makeText(this, "Failed to get location: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                faceRegistered = false;
+            });
+
             return;
         }
 
-        fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY,
-                new CancellationTokenSource().getToken()
-        ).addOnSuccessListener(location -> {
-            if (location != null) {
-                float[] results = new float[1];
-                android.location.Location.distanceBetween(
-                        OFFICE_LAT, OFFICE_LNG,
-                        location.getLatitude(), location.getLongitude(),
-                        results
-                );
-                float distanceInMeters = results[0];
+        float[] results = new float[1];
+        android.location.Location.distanceBetween(
+                OFFICE_LAT, OFFICE_LNG,
+                currentLocation.getLatitude(), currentLocation.getLongitude(),
+                results
+        );
+        float distanceInMeters = results[0];
 
-                if (distanceInMeters <= ALLOWED_RADIUS_METERS) {
-                    saveAttendance(employee);
-                } else {
-                    runOnUiThread(() ->
-                            Toast.makeText(this, "Outside office zone: " + distanceInMeters + "m", Toast.LENGTH_LONG).show()
-                    );
-                }
-            } else {
-                runOnUiThread(() ->
-                        Toast.makeText(this, "Cannot get location", Toast.LENGTH_SHORT).show()
-                );
-            }
-        });
+        if (distanceInMeters <= ALLOWED_RADIUS_METERS) {
+            saveAttendance(employee);
+        } else {
+            Toast.makeText(this, "Outside office zone: " + distanceInMeters + "m", Toast.LENGTH_LONG).show();
+            faceRegistered = false;
+        }
     }
 
     private void saveAttendance(MainActivity.EmployeeModel employee) {
@@ -418,7 +459,7 @@ public class ScanFace extends AppCompatActivity {
 
         String timeStr = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new java.util.Date());
         emp.insertAttendance(employee.id, timeStr, type);
-        Toast.makeText(this, "Attendance saved: " + type + " " + timeStr, Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Saved: " + type + " " + timeStr, Toast.LENGTH_SHORT).show();
 
         runOnUiThread(() -> {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {

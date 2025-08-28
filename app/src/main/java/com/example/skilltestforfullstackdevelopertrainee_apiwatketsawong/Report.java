@@ -41,7 +41,7 @@ public class Report extends AppCompatActivity {
         List<Report.EmployeeModel> employeeList = loadEmployees();
 
         Report.EmployeeAdapter adapter = new Report.EmployeeAdapter(this, employeeList, employee -> {
-            // เมื่อคลิกชื่อพนักงาน ส่งไปหน้า ScanFaceActivity
+            // เมื่อคลิกชื่อพนักงาน ส่งไปหน้า ReportPerson
             Intent intent = new Intent(Report.this, ReportPerson.class);
             intent.putExtra("employeeId", employee.id);
             startActivity(intent);
