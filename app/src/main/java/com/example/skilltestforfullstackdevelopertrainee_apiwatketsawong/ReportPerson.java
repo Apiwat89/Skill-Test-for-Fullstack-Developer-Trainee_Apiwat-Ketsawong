@@ -62,7 +62,7 @@ public class ReportPerson extends AppCompatActivity {
     // Adapter
     public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.ViewHolder> {
 
-        private List<AttendanceRecord> records;
+        private final List<AttendanceRecord> records;
 
         public AttendanceAdapter(List<AttendanceRecord> records) {
             this.records = records;

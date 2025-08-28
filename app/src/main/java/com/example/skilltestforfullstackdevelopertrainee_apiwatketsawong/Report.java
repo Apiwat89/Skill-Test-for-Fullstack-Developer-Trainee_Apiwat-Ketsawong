@@ -65,9 +65,9 @@ public class Report extends AppCompatActivity {
     }
 
     public class EmployeeAdapter extends RecyclerView.Adapter<Report.EmployeeAdapter.ViewHolder> {
-        private Context context;
-        private List<Report.EmployeeModel> employeeList;
-        private Report.OnItemClickListener listener;
+        private final Context context;
+        private final List<Report.EmployeeModel> employeeList;
+        private final Report.OnItemClickListener listener;
 
         public EmployeeAdapter(Context context, List<Report.EmployeeModel> employeeList, Report.OnItemClickListener listener) {
             this.context = context;

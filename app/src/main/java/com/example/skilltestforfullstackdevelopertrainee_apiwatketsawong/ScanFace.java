@@ -66,8 +66,8 @@ public class ScanFace extends AppCompatActivity {
     private LocationRequest locationRequest;
     private android.location.Location currentLocation;
 
-    private static final double OFFICE_LAT = 14.146196809999436;
-    private static final double OFFICE_LNG = 101.3660215078272;
+    private static final double OFFICE_LAT = 14.146200709631936;
+    private static final double OFFICE_LNG = 101.36599212030552;
     private static final float ALLOWED_RADIUS_METERS = 200f;
     private static final int REQUEST_LOCATION_PERMISSION = 101;
 
@@ -313,7 +313,7 @@ public class ScanFace extends AppCompatActivity {
 
             Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true);
 
-            ByteBuffer input = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
+            ByteBuffer input = ByteBuffer.allocateDirect(INPUT_SIZE * INPUT_SIZE * 3 * 4);
             input.order(ByteOrder.nativeOrder());
 
             for (int y = 0; y < INPUT_SIZE; y++) {

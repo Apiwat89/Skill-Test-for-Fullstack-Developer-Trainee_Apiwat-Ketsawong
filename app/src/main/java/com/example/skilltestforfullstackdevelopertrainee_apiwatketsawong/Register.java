@@ -266,7 +266,7 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
 
             Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true);
 
-            ByteBuffer input = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
+            ByteBuffer input = ByteBuffer.allocateDirect(INPUT_SIZE * INPUT_SIZE * 3 * 4);
             input.order(ByteOrder.nativeOrder());
 
             for (int y = 0; y < INPUT_SIZE; y++) {

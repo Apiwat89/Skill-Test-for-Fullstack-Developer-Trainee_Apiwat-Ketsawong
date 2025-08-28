@@ -81,9 +81,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     public class EmployeeAdapter extends RecyclerView.Adapter<EmployeeAdapter.ViewHolder> {
-        private Context context;
-        private List<EmployeeModel> employeeList;
-        private OnItemClickListener listener;
+        private final Context context;
+        private final List<EmployeeModel> employeeList;
+        private final OnItemClickListener listener;
 
         public EmployeeAdapter(Context context, List<EmployeeModel> employeeList, OnItemClickListener listener) {
             this.context = context;
