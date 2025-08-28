@@ -7,6 +7,7 @@ import android.content.res.AssetFileDescriptor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
@@ -71,7 +72,11 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
     private Button btnNextRegister;
     private Employee emp;
     private boolean faceSaved = false;
+
+    // TFLite
     private Interpreter tfLite;
+    private static final int INPUT_SIZE = 112;
+    private static final int EMBEDDING_SIZE = 192;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,7 +89,6 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
         btnNextRegister = findViewById(R.id.btnNextRegister);
 
         btnNextRegister.setOnClickListener(this);
-        requestPermissions();
         loadModel();
 
 //        testFaceRegistrationWithDrawable(); // test
@@ -104,6 +108,8 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
             } else if (InputPositionEmployee.getText().toString().isEmpty()) {
                 InputPositionEmployee.setError("Please enter position");
             } else {
+                requestPermissions();
+
                 String name = InputNameEmployee.getText().toString().trim();
                 String position = InputPositionEmployee.getText().toString().trim();
 
@@ -195,21 +201,22 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
                                                 Face face = faces.get(0);
 
                                                 // ตรวจสอบใบหน้าอยู่ในกรอบ
-                                                Rect bounds = face.getBoundingBox();
-                                                float scaleX = (float) previewView.getWidth() / (float) mediaImage.getHeight();
-                                                float scaleY = (float) previewView.getHeight() / (float) mediaImage.getWidth();
-                                                float centerX = bounds.centerX() * scaleX;
-                                                float centerY = bounds.centerY() * scaleY;
+                                                float scaleX = previewView.getWidth() / (float) mediaImage.getHeight();
+                                                float scaleY = previewView.getHeight() / (float) mediaImage.getWidth();
+                                                float centerX = face.getBoundingBox().centerX() * scaleX;
+                                                float centerY = face.getBoundingBox().centerY() * scaleY;
 
                                                 long currentTime = System.currentTimeMillis();
 
-                                                if (new RectF(left, top, left + width, top + height).contains(centerX, centerY)) {
+                                                if (rect.contains(centerX, centerY)) {
                                                     if (faceStartTime[0] == 0) faceStartTime[0] = currentTime;
                                                     else if (currentTime - faceStartTime[0] >= REQUIRED_DURATION_MS) {
-                                                        // ใช้โมเดลจริง
-                                                        float[] embedding = getFaceEmbedding(mediaImage, face);
+                                                        float[] embedding = getFaceEmbedding(imageProxy, face);
+                                                        if (embedding == null) {
+                                                            Toast.makeText(this, "Unable to capture face. Please scan again.", Toast.LENGTH_SHORT).show();
+                                                            return;
+                                                        }
 
-                                                        // บันทึกลง DB
                                                         ByteBuffer buffer = ByteBuffer.allocate(embedding.length * 4).order(ByteOrder.LITTLE_ENDIAN);
                                                         for (float f : embedding) buffer.putFloat(f);
                                                         byte[] faceBytes = buffer.array();
@@ -250,42 +257,97 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
     }
 
     @ExperimentalGetImage
-    private float[] getFaceEmbedding(Image mediaImage, Face face) {
-        Bitmap bitmap = toBitmap(mediaImage);
+    private float[] getFaceEmbedding(ImageProxy imageProxy, Face face) {
+        try {
+            Bitmap bitmap = toBitmap(imageProxy);
+            if (bitmap == null) return null;
 
-        Rect bounds = face.getBoundingBox();
-        bounds.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight());
-        Bitmap faceBitmap = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height());
+            Rect bounds = new Rect(face.getBoundingBox());
+            bounds.left   = Math.max(0, bounds.left);
+            bounds.top    = Math.max(0, bounds.top);
+            bounds.right  = Math.min(bitmap.getWidth(), bounds.right);
+            bounds.bottom = Math.min(bitmap.getHeight(), bounds.bottom);
 
-        Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, 112, 112, true);
+            int faceWidth = bounds.width();
+            int faceHeight = bounds.height();
+            if (faceWidth <= 0 || faceHeight <= 0) return null;
 
-        ByteBuffer input = ByteBuffer.allocateDirect(1 * 112 * 112 * 3 * 4);
-        input.order(ByteOrder.nativeOrder());
+            Bitmap faceBitmap;
+            try {
+                faceBitmap = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, faceWidth, faceHeight);
+            } catch (Exception e) {return null;}
 
-        for (int y = 0; y < 112; y++) {
-            for (int x = 0; x < 112; x++) {
-                int px = resized.getPixel(x, y);
-                input.putFloat(((px >> 16 & 0xFF) - 127.5f) / 128f); // R
-                input.putFloat(((px >> 8 & 0xFF) - 127.5f) / 128f);  // G
-                input.putFloat(((px & 0xFF) - 127.5f) / 128f);       // B
+            Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true);
+
+            ByteBuffer input = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
+            input.order(ByteOrder.nativeOrder());
+
+            for (int y = 0; y < INPUT_SIZE; y++) {
+                for (int x = 0; x < INPUT_SIZE; x++) {
+                    int px = resized.getPixel(x, y);
+
+                    float r = ((px >> 16) & 0xFF) / 255.0f;
+                    float g = ((px >> 8) & 0xFF) / 255.0f;
+                    float b = (px & 0xFF) / 255.0f;
+
+                    input.putFloat((r - 0.5f) * 2f);
+                    input.putFloat((g - 0.5f) * 2f);
+                    input.putFloat((b - 0.5f) * 2f);
+                }
             }
-        }
 
-        float[][] embedding = new float[1][192]; // MobileFaceNet output
-        tfLite.run(input, embedding);
+            float[][] embedding = new float[1][EMBEDDING_SIZE];
+            tfLite.run(input, embedding);
 
-        return embedding[0];
+            return embedding[0];
+        } catch (Exception e) {return null;}
     }
 
-    private Bitmap toBitmap(Image mediaImage) {
-        if (mediaImage == null) return null;
-        Bitmap bitmap = Bitmap.createBitmap(mediaImage.getWidth(), mediaImage.getHeight(), Bitmap.Config.ARGB_8888);
-        YuvToRgbConverter converter = new YuvToRgbConverter(this);
-        converter.yuvToRgb(mediaImage, bitmap);
+    private Bitmap toBitmap(ImageProxy imageProxy) {
+        @SuppressLint("UnsafeOptInUsageError")
+        Image image = imageProxy.getImage();
+        if (image == null) return null;
+
+        YuvToRgbConverter yuvToRgbConverter = new YuvToRgbConverter(this, 640, 480);
+        if (yuvToRgbConverter == null) {
+            yuvToRgbConverter = new YuvToRgbConverter(this, imageProxy.getWidth(), imageProxy.getHeight());
+        }
+
+        Bitmap bitmap = Bitmap.createBitmap(imageProxy.getWidth(), imageProxy.getHeight(), Bitmap.Config.ARGB_8888);
+        byte[] nv21 = yuv420ToNv21(image);
+        yuvToRgbConverter.yuvToRgb(nv21, bitmap);
+
+        // หมุนตาม orientation
+        int rotation = imageProxy.getImageInfo().getRotationDegrees();
+        if (rotation != 0) {
+            Matrix matrix = new Matrix();
+            matrix.postRotate(rotation);
+            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        }
+
         return bitmap;
     }
 
-    //    private void testFaceRegistrationWithDrawable() {
+    private byte[] yuv420ToNv21(Image image) {
+        byte[] nv21;
+        ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
+        ByteBuffer uBuffer = image.getPlanes()[1].getBuffer();
+        ByteBuffer vBuffer = image.getPlanes()[2].getBuffer();
+
+        int ySize = yBuffer.remaining();
+        int uSize = uBuffer.remaining();
+        int vSize = vBuffer.remaining();
+
+        nv21 = new byte[ySize + uSize + vSize];
+
+        yBuffer.get(nv21, 0, ySize);
+        vBuffer.get(nv21, ySize, vSize);
+        uBuffer.get(nv21, ySize + vSize, uSize);
+
+        return nv21;
+    }
+
+//        private void testFaceRegistrationWithDrawable() {
 //        Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.test_face);
 //
 //        if (bitmap == null) {
@@ -331,7 +393,7 @@ public class Register extends AppCompatActivity implements View.OnClickListener 
 //                })
 //                .addOnFailureListener(e -> Toast.makeText(this, "Face detection failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
 //    }
-
+//
 //    public float[] getFaceEmbedding(Bitmap bitmap, Face face) {
 //        Rect bounds = face.getBoundingBox();
 //        bounds.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight());

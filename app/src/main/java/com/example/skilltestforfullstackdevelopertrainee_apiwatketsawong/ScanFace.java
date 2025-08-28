@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.location.Location;
@@ -68,11 +69,9 @@ import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 
 public class ScanFace extends AppCompatActivity {
-    private PreviewView previewView;
     private int employeeId;
     private Employee emp;
     private boolean faceRegistered = false;
-    private boolean faceMismatchShown = false;
 
     private FusedLocationProviderClient fusedLocationClient;
     private static final double OFFICE_LAT = 37.4220936;
@@ -96,7 +95,6 @@ public class ScanFace extends AppCompatActivity {
             return insets;
         });
 
-        previewView = findViewById(R.id.previewView);
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
         emp = new Employee(this);
 
@@ -107,32 +105,15 @@ public class ScanFace extends AppCompatActivity {
         }
 
         loadModel();
-
-        if (checkPermissions()) startCamera(employeeId);
-        else requestPermissions();
+        requestPermissions();
+        startCamera(employeeId);
 
 //        testFaceWithDrawable(employeeId); // test
     }
 
-    private boolean checkPermissions() {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-    }
-
     private void requestPermissions() {
-        ActivityCompat.requestPermissions(this,
-                new String[]{Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION},
-                REQUEST_CODE_PERMISSIONS);
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_CODE_PERMISSIONS && checkPermissions()) {
-            startCamera(employeeId);
-        } else {
-            Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show();
-            finish();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
     }
 
@@ -168,10 +149,10 @@ public class ScanFace extends AppCompatActivity {
 
     @OptIn(markerClass = ExperimentalGetImage.class)
     private void startCamera(int employeeId) {
+        PreviewView previewView = findViewById(R.id.faceScannerView);
         FaceOverlayView faceOverlay = findViewById(R.id.faceOverlay);
 
         previewView.post(() -> {
-            // สร้างกรอบใบหน้า
             int width = previewView.getWidth() * 2 / 3;
             int height = previewView.getHeight() / 3;
             int left = (previewView.getWidth() - width) / 2;
@@ -183,7 +164,6 @@ public class ScanFace extends AppCompatActivity {
             cameraProviderFuture.addListener(() -> {
                 try {
                     ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
-
                     Preview preview = new Preview.Builder().build();
                     preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
@@ -198,7 +178,6 @@ public class ScanFace extends AppCompatActivity {
                             .setMinFaceSize(0.2f)
                             .enableTracking()
                             .build();
-
                     FaceDetector detector = FaceDetection.getClient(options);
 
                     final long REQUIRED_DURATION_MS = 2000;
@@ -217,38 +196,51 @@ public class ScanFace extends AppCompatActivity {
                             InputImage inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.getImageInfo().getRotationDegrees());
                             detector.process(inputImage)
                                     .addOnSuccessListener(faces -> {
-                                        if (!faces.isEmpty()) {
-                                            Face face = faces.get(0);
+                                        try {
+                                            if (!faces.isEmpty()) {
+                                                Face face = faces.get(0);
 
-                                            float scaleX = (float) previewView.getWidth() / mediaImage.getHeight();
-                                            float scaleY = (float) previewView.getHeight() / mediaImage.getWidth();
-                                            float centerX = face.getBoundingBox().centerX() * scaleX;
-                                            float centerY = face.getBoundingBox().centerY() * scaleY;
+                                                // Scale centerX/centerY ให้ตรงกับ PreviewView
+                                                float scaleX = previewView.getWidth() / (float) mediaImage.getHeight();
+                                                float scaleY = previewView.getHeight() / (float) mediaImage.getWidth();
+                                                float centerX = face.getBoundingBox().centerX() * scaleX;
+                                                float centerY = face.getBoundingBox().centerY() * scaleY;
 
-                                            long currentTime = System.currentTimeMillis();
+                                                long currentTime = System.currentTimeMillis();
 
-                                            if (rect.contains(centerX, centerY)) {
-                                                if (faceStartTime[0] == 0) faceStartTime[0] = currentTime;
-                                                else if (currentTime - faceStartTime[0] >= REQUIRED_DURATION_MS) {
-                                                    float[] embedding = getFaceEmbedding(mediaImage, face);
-                                                    byte[] savedFaceBytes = employee.faceEmbedding;
-                                                    float[] savedEmbedding = byteArrayToFloatArray(savedFaceBytes);
+                                                if (rect.contains(centerX, centerY)) {
+                                                    if (faceStartTime[0] == 0) faceStartTime[0] = currentTime;
+                                                    else if (currentTime - faceStartTime[0] >= REQUIRED_DURATION_MS) {
+                                                        float[] embedding = getFaceEmbedding(imageProxy, face);
+                                                        if (embedding == null) {
+                                                            Toast.makeText(this, "Unable to capture face. Try again.", Toast.LENGTH_SHORT).show();
+                                                            imageProxy.close();
+                                                            return;
+                                                        }
 
-                                                    if (compareEmbeddings(embedding, savedEmbedding)) {
-                                                        faceRegistered = true;
-                                                        Toast.makeText(this, "Face matched!", Toast.LENGTH_SHORT).show();
-                                                        checkLocationAndSaveFace(employee);
-                                                    } else {
-                                                        if (!faceMismatchShown) {
-                                                            faceMismatchShown = true;
-                                                            Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
-                                                            new android.os.Handler().postDelayed(() -> faceMismatchShown = false, 2000);
+                                                        byte[] savedFaceBytes = employee.faceEmbedding;
+                                                        float[] savedEmbedding = byteArrayToFloatArray(savedFaceBytes);
+
+                                                        float distance = calculateDistance(embedding, savedEmbedding);
+                                                        Toast.makeText(this, "Distance = " + distance, Toast.LENGTH_SHORT).show();
+
+                                                        if (distance < 2.5f) {
+                                                            faceRegistered = true;
+                                                            Toast.makeText(this, "Face matched!", Toast.LENGTH_SHORT).show();
+                                                            checkLocationAndSaveFace(employee);
+                                                        } else {
+                                                            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                                                                Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
+                                                            }, 2000);
                                                         }
                                                     }
-                                                }
+                                                } else faceStartTime[0] = 0;
                                             } else faceStartTime[0] = 0;
-                                        } else faceStartTime[0] = 0;
-                                        imageProxy.close();
+                                        } catch (Exception e) {
+                                            e.printStackTrace();
+                                        } finally {
+                                            imageProxy.close();
+                                        }
                                     })
                                     .addOnFailureListener(e -> imageProxy.close());
                         } else {
@@ -260,7 +252,7 @@ public class ScanFace extends AppCompatActivity {
                     cameraProvider.unbindAll();
                     cameraProvider.bindToLifecycle(this, cameraSelector, preview, analysis);
 
-                } catch (Exception e) {
+                } catch (ExecutionException | InterruptedException e) {
                     e.printStackTrace();
                 }
             }, ContextCompat.getMainExecutor(this));
@@ -268,40 +260,94 @@ public class ScanFace extends AppCompatActivity {
     }
 
     @ExperimentalGetImage
-    public float[] getFaceEmbedding(Image mediaImage, Face face) {
-        Bitmap bitmap = toBitmap(mediaImage);
-        Rect bounds = face.getBoundingBox();
-        bounds.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight());
-        Bitmap faceBitmap = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height());
+    private float[] getFaceEmbedding(ImageProxy imageProxy, Face face) {
+        try {
+            Bitmap bitmap = toBitmap(imageProxy);
+            if (bitmap == null) return null;
 
-        Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true);
-        ByteBuffer imgData = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
-        imgData.order(ByteOrder.nativeOrder());
-        imgData.rewind();
+            Rect bounds = new Rect(face.getBoundingBox());
+            bounds.left   = Math.max(0, bounds.left);
+            bounds.top    = Math.max(0, bounds.top);
+            bounds.right  = Math.min(bitmap.getWidth(), bounds.right);
+            bounds.bottom = Math.min(bitmap.getHeight(), bounds.bottom);
 
-        for (int y = 0; y < INPUT_SIZE; y++) {
-            for (int x = 0; x < INPUT_SIZE; x++) {
-                int px = resized.getPixel(x, y);
-                float r = ((px >> 16) & 0xFF) / 255f;
-                float g = ((px >> 8) & 0xFF) / 255f;
-                float b = (px & 0xFF) / 255f;
-                imgData.putFloat((r - 0.5f) * 2);
-                imgData.putFloat((g - 0.5f) * 2);
-                imgData.putFloat((b - 0.5f) * 2);
+            int faceWidth = bounds.width();
+            int faceHeight = bounds.height();
+            if (faceWidth <= 0 || faceHeight <= 0) return null;
+
+            Bitmap faceBitmap;
+            try {
+                faceBitmap = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, faceWidth, faceHeight);
+            } catch (Exception e) {return null;}
+
+            Bitmap resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true);
+
+            ByteBuffer input = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
+            input.order(ByteOrder.nativeOrder());
+
+            for (int y = 0; y < INPUT_SIZE; y++) {
+                for (int x = 0; x < INPUT_SIZE; x++) {
+                    int px = resized.getPixel(x, y);
+
+                    float r = ((px >> 16) & 0xFF) / 255.0f;
+                    float g = ((px >> 8) & 0xFF) / 255.0f;
+                    float b = (px & 0xFF) / 255.0f;
+
+                    input.putFloat((r - 0.5f) * 2f);
+                    input.putFloat((g - 0.5f) * 2f);
+                    input.putFloat((b - 0.5f) * 2f);
+                }
             }
-        }
 
-        float[][] embedding = new float[1][EMBEDDING_SIZE];
-        tfLite.run(imgData, embedding);
-        return embedding[0];
+            float[][] embedding = new float[1][EMBEDDING_SIZE];
+            tfLite.run(input, embedding);
+
+            return embedding[0];
+        } catch (Exception e) {return null;}
     }
 
-    private Bitmap toBitmap(Image mediaImage) {
-        if (mediaImage == null) return null;
-        Bitmap bitmap = Bitmap.createBitmap(mediaImage.getWidth(), mediaImage.getHeight(), Bitmap.Config.ARGB_8888);
-        YuvToRgbConverter converter = new YuvToRgbConverter(this);
-        converter.yuvToRgb(mediaImage, bitmap);
+    private Bitmap toBitmap(ImageProxy imageProxy) {
+        @SuppressLint("UnsafeOptInUsageError")
+        Image image = imageProxy.getImage();
+        if (image == null) return null;
+
+        YuvToRgbConverter yuvToRgbConverter = new YuvToRgbConverter(this, 640, 480);
+        if (yuvToRgbConverter == null) {
+            yuvToRgbConverter = new YuvToRgbConverter(this, imageProxy.getWidth(), imageProxy.getHeight());
+        }
+
+        Bitmap bitmap = Bitmap.createBitmap(imageProxy.getWidth(), imageProxy.getHeight(), Bitmap.Config.ARGB_8888);
+        byte[] nv21 = yuv420ToNv21(image);
+        yuvToRgbConverter.yuvToRgb(nv21, bitmap);
+
+        // หมุนตาม orientation
+        int rotation = imageProxy.getImageInfo().getRotationDegrees();
+        if (rotation != 0) {
+            Matrix matrix = new Matrix();
+            matrix.postRotate(rotation);
+            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        }
+
         return bitmap;
+    }
+
+    private byte[] yuv420ToNv21(Image image) {
+        byte[] nv21;
+        ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
+        ByteBuffer uBuffer = image.getPlanes()[1].getBuffer();
+        ByteBuffer vBuffer = image.getPlanes()[2].getBuffer();
+
+        int ySize = yBuffer.remaining();
+        int uSize = uBuffer.remaining();
+        int vSize = vBuffer.remaining();
+
+        nv21 = new byte[ySize + uSize + vSize];
+
+        yBuffer.get(nv21, 0, ySize);
+        vBuffer.get(nv21, ySize, vSize);
+        uBuffer.get(nv21, ySize + vSize, uSize);
+
+        return nv21;
     }
 
     private float[] byteArrayToFloatArray(byte[] bytes) {
@@ -316,15 +362,14 @@ public class ScanFace extends AppCompatActivity {
         return floats;
     }
 
-    private boolean compareEmbeddings(float[] a, float[] b) {
-        if (a.length != b.length) return false;
+    private float calculateDistance(float[] a, float[] b) {
+        if (a.length != b.length) return Float.MAX_VALUE;
         float sum = 0f;
         for (int i = 0; i < a.length; i++) {
             float diff = a[i] - b[i];
             sum += diff * diff;
         }
-        float distance = (float) Math.sqrt(sum);
-        return distance < 1.0f;
+        return (float) Math.sqrt(sum);
     }
 
     private void checkLocationAndSaveFace(MainActivity.EmployeeModel employee) {
@@ -346,9 +391,18 @@ public class ScanFace extends AppCompatActivity {
                 );
                 float distanceInMeters = results[0];
 
-                if (distanceInMeters <= ALLOWED_RADIUS_METERS) saveAttendance(employee);
-                else Toast.makeText(this, "Outside office zone: " + distanceInMeters + "m", Toast.LENGTH_LONG).show();
-            } else Toast.makeText(this, "Cannot get location", Toast.LENGTH_SHORT).show();
+                if (distanceInMeters <= ALLOWED_RADIUS_METERS) {
+                    saveAttendance(employee);
+                } else {
+                    runOnUiThread(() ->
+                            Toast.makeText(this, "Outside office zone: " + distanceInMeters + "m", Toast.LENGTH_LONG).show()
+                    );
+                }
+            } else {
+                runOnUiThread(() ->
+                        Toast.makeText(this, "Cannot get location", Toast.LENGTH_SHORT).show()
+                );
+            }
         });
     }
 
@@ -364,14 +418,15 @@ public class ScanFace extends AppCompatActivity {
 
         String timeStr = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new java.util.Date());
         emp.insertAttendance(employee.id, timeStr, type);
-
         Toast.makeText(this, "Attendance saved: " + type + " " + timeStr, Toast.LENGTH_SHORT).show();
 
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
-        }, 2000);
+        runOnUiThread(() -> {
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                Intent intent = new Intent(this, MainActivity.class);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(intent);
+            }, 2000);
+        });
     }
 
 //    private void testFaceWithDrawable(int employeeId) {
@@ -386,7 +441,9 @@ public class ScanFace extends AppCompatActivity {
 //
 //        // เปรียบเทียบ embedding → ต้อง match
 //        if (compareEmbeddings(embedding, embedding)) {
+//            Log.d("FaceCheck", "Embeddings matched"); // <-- เช็คว่าเข้า if หรือไม่
 //            Toast.makeText(this, "Face matched!", Toast.LENGTH_SHORT).show();
+//            Log.d("FaceCheck", "Calling checkLocationAndSaveFace"); // <-- เช็คว่าเรียกฟังก์ชันต่อ
 //            checkLocationAndSaveFace(employee);
 //        } else {
 //            Toast.makeText(this, "Face mismatch!", Toast.LENGTH_SHORT).show();

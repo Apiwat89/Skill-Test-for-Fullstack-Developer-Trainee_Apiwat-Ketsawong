@@ -12,7 +12,7 @@ import java.util.List;
 
 public class Employee extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "attendance.db";
-    private static final int DATABASE_VERSION = 3;
+    private static final int DATABASE_VERSION = 4;
 
     public Employee(Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
@@ -49,47 +49,19 @@ public class Employee extends SQLiteOpenHelper {
         db.setForeignKeyConstraintsEnabled(true);
     }
 
-    // Insert employee with embedding
+    // Insert employee
     public void insertEmployeeWithEmbedding(String name, String position, byte[] embedding) {
         SQLiteDatabase db = this.getWritableDatabase();
         ContentValues values = new ContentValues();
         values.put("name", name);
         values.put("position", position);
-        values.put("faceEmbedding", floatArrayToByteArray(embedding));
+        values.put("faceEmbedding", embedding);
         db.insert("employees", null, values);
         db.close();
     }
 
-    // แปลง float[] -> byte[]
-    private byte[] floatArrayToByteArray(byte[] array) {
-        ByteBuffer buffer = ByteBuffer.allocate(array.length * 4);
-        for (float f : array) buffer.putFloat(f);
-        return buffer.array();
-    }
-
-//    // แปลง byte[] -> float[]
-//    private float[] byteArrayToFloatArray(byte[] bytes) {
-//        float[] array = new float[bytes.length / 4];
-//        ByteBuffer.wrap(bytes).asFloatBuffer().get(array);
-//        return array;
-//    }
-//
-//    // ดึง embedding ของพนักงาน
-//    public float[] getEmployeeEmbedding(int employeeId) {
-//        SQLiteDatabase db = this.getReadableDatabase();
-//        Cursor cursor = db.rawQuery("SELECT faceEmbedding FROM employees WHERE id = ?", new String[]{String.valueOf(employeeId)});
-//        float[] embedding = null;
-//        if (cursor.moveToFirst()) {
-//            byte[] blob = cursor.getBlob(0);
-//            embedding = byteArrayToFloatArray(blob);
-//        }
-//        cursor.close();
-//        db.close();
-//        return embedding;
-//    }
-
-    // ดึงข้อมูลพนักงานทั้งหมด
-    public List<MainActivity.EmployeeModel> getAllEmployees() {
+    // ดึงข้อมูล Employee ทั้งหมด MainActivity
+    public List<MainActivity.EmployeeModel> getAllEmployeesMainActivity() {
         List<MainActivity.EmployeeModel> list = new ArrayList<>();
         SQLiteDatabase db = this.getReadableDatabase();
         Cursor cursor = db.rawQuery("SELECT id, name, position, faceEmbedding FROM employees", null);
@@ -108,7 +80,27 @@ public class Employee extends SQLiteOpenHelper {
         return list;
     }
 
-    // ดึงพนักงานตาม id
+    // ดึงข้อมูล Employee ทั้งหมด Report
+    public List<Report.EmployeeModel> getAllEmployeesReport() {
+        List<Report.EmployeeModel> list = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT id, name, position, faceEmbedding FROM employees", null);
+        if (cursor.moveToFirst()) {
+            do {
+                Report.EmployeeModel em = new Report.EmployeeModel();
+                em.id = cursor.getInt(0);
+                em.name = cursor.getString(1);
+                em.position = cursor.getString(2);
+                em.faceEmbedding = cursor.getBlob(3);
+                list.add(em);
+            } while (cursor.moveToNext());
+        }
+        cursor.close();
+        db.close();
+        return list;
+    }
+
+    // ดึง Employee ตาม id หน้า MainActivity
     public MainActivity.EmployeeModel getEmployeeById(int id) {
         SQLiteDatabase db = this.getReadableDatabase();
         Cursor cursor = db.rawQuery("SELECT id, name, position, faceEmbedding FROM employees WHERE id = ?", new String[]{String.valueOf(id)});
@@ -134,5 +126,26 @@ public class Employee extends SQLiteOpenHelper {
         values.put("type", type);
         db.insert("attendance", null, values);
         db.close();
+    }
+
+    // ดึง attendance ตาม id หน้า Report
+    public List<ReportPerson.AttendanceRecord> getAttendanceByEmployee(int employeeId) {
+        List<ReportPerson.AttendanceRecord> list = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT timestamp, type FROM attendance WHERE employeeId = ? ORDER BY timestamp DESC",
+                new String[]{String.valueOf(employeeId)}
+        );
+        if (cursor.moveToFirst()) {
+            do {
+                ReportPerson.AttendanceRecord record = new ReportPerson.AttendanceRecord();
+                record.timestamp = cursor.getString(0);
+                record.type = cursor.getString(1);
+                list.add(record);
+            } while (cursor.moveToNext());
+        }
+        cursor.close();
+        db.close();
+        return list;
     }
 }

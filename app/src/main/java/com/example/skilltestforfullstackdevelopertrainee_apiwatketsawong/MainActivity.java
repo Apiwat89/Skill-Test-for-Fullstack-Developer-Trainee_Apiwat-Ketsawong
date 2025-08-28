@@ -66,7 +66,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private List<EmployeeModel> loadEmployees() {
-        return emp.getAllEmployees();
+        return emp.getAllEmployeesMainActivity();
     }
 
     public static class EmployeeModel {
