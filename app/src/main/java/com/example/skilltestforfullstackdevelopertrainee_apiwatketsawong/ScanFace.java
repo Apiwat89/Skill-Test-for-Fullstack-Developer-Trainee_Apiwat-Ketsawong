@@ -1,5 +1,6 @@
 package com.example.skilltestforfullstackdevelopertrainee_apiwatketsawong;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -11,23 +12,6 @@ import android.media.Image;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Toast;
-
-import com.google.android.gms.tasks.CancellationTokenSource;
-import com.google.android.gms.location.Priority;
-
-import org.tensorflow.lite.Interpreter;
-
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.ExecutionException;
 
 import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
@@ -52,6 +36,7 @@ import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
+import com.google.android.gms.tasks.CancellationTokenSource;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
@@ -59,7 +44,18 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
-import android.Manifest;
+import org.tensorflow.lite.Interpreter;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.Locale;
+import java.util.concurrent.ExecutionException;
 
 public class ScanFace extends AppCompatActivity {
     private int employeeId;
