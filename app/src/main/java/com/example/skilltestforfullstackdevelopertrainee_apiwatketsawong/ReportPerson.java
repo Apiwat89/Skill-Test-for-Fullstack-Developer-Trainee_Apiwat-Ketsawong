@@ -43,7 +43,7 @@ public class ReportPerson extends AppCompatActivity {
 
         MainActivity.EmployeeModel employee = emp.getEmployeeById(employeeId);
         if (employee != null) {
-            titleText.setText(employee.name + " Records");
+            titleText.setText(employee.name);
 
             // ดึง attendance
             List<AttendanceRecord> records = emp.getAttendanceByEmployee(employeeId);

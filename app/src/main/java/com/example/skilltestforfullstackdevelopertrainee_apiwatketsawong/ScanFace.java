@@ -66,8 +66,9 @@ public class ScanFace extends AppCompatActivity {
     private LocationRequest locationRequest;
     private android.location.Location currentLocation;
 
-    private static final double OFFICE_LAT = 14.146200709631936;
-    private static final double OFFICE_LNG = 101.36599212030552;
+    // ปักหมุดไว้ที่ https://maps.app.goo.gl/tDUvzRgVJJqD2itC7
+    private static final double OFFICE_LAT = 13.722363592997352;
+    private static final double OFFICE_LNG = 100.5295836254038;
     private static final float ALLOWED_RADIUS_METERS = 200f;
     private static final int REQUEST_LOCATION_PERMISSION = 101;
 
