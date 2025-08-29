@@ -1,4 +1,4 @@
-# Skill Test for Fullstack Developer Trainee_Apiwat Ketsawong
+# Skill Test for Fullstack Developer Trainee_Apiwat
 
 📌 Face Recognition Attendance App
 แอป Android สำหรับ บันทึกเวลาเข้า–ออกงาน ด้วยการ
