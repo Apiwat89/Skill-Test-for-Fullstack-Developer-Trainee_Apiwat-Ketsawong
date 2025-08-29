@@ -256,14 +256,14 @@ public class ScanFace extends AppCompatActivity {
 
                                                         float distance = calculateDistance(embedding, savedEmbedding);
 
-                                                        if (distance < 1.5f) {
+                                                        if (distance < 0.7f) {
                                                             faceRegistered = true;
                                                             Toast.makeText(this, "Face matched!", Toast.LENGTH_SHORT).show();
                                                             checkLocationAndSaveFace(employee);
                                                         } else {
-                                                            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                                                                Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show();
-                                                            }, 2000);
+                                                            runOnUiThread(() ->
+                                                                    Toast.makeText(this, "Face not match!", Toast.LENGTH_SHORT).show()
+                                                            );
                                                         }
                                                     }
                                                 } else faceStartTime[0] = 0;
