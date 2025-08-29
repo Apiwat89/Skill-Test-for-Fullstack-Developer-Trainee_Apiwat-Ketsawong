@@ -1,7 +1,7 @@
 # Skill Test for Fullstack Developer Trainee_Apiwat
 
 📌 Face Recognition Attendance App
-An Android application for recording employee check-in and check-out times using face recognition and GPS validation.
+- An Android application for recording employee check-in and check-out times using face recognition and GPS validation.
 
 🚀 Features
 - Face Register → Register employees with their facial data.
